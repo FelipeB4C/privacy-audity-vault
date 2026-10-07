@@ -38,27 +38,27 @@ spring:
     baseline-on-migrate: true
 
 # Configurações customizadas da AWS KMS / LocalStack (Região ca-central-1 para Loi 25)
-aws:
-  region: ca-central-1
-  kms:
-    endpoint: http://localhost:4566 # Porta do LocalStack no docker-compose.yml
-    key-alias: alias/pav-kms-key
-  credentials:
-    access-key: test # Credencial genérica para LocalStack em dev/teste
-    secret-key: test
-
-# Exposição de Métricas do Actuator & Prometheus
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-  endpoint:
-    health:
-      show-details: always
-  metrics:
-    tags:
-      application: ${spring.application.name}
-    export:
-      prometheus:
-        enabled: true
+#aws:
+#  region: ca-central-1
+#  kms:
+#    endpoint: http://localhost:4566 # Porta do LocalStack no docker-compose.yml
+#    key-alias: alias/pav-kms-key
+#  credentials:
+#    access-key: test # Credencial genérica para LocalStack em dev/teste
+#    secret-key: test
+#
+## Exposição de Métricas do Actuator & Prometheus
+#management:
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health,info,metrics,prometheus
+#  endpoint:
+#    health:
+#      show-details: always
+#  metrics:
+#    tags:
+#      application: ${spring.application.name}
+#    export:
+#      prometheus:
+#        enabled: true

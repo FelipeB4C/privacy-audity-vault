@@ -15,24 +15,36 @@ java {
 
 repositories {
 	mavenCentral()
+	// Inserido: Repositorios oficiais para resolucao de dependencias do Spring Boot 4.x
+	maven { url = uri("https://repo.spring.io/milestone") }
+	maven { url = uri("https://repo.spring.io/snapshot") }
 }
 
 dependencies {
 	// Spring Boot Starters
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-	implementation("org.springframework.boot:spring-boot-starter-aop")
+	// Inserido: Starter descomentado para habilitar interceptacao de auditoria (@Auditable)
+	implementation("org.springframework.boot:spring-boot-starter-aspectj")
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
-	// Banco de Dados &amp; Migrações Flyway runtimeOnly("org.postgresql:postgresql")
+
+	// Inserido: Driver PostgreSQL isolado em linha propria sem caracteres HTML
+	runtimeOnly("org.postgresql:postgresql")
 	implementation("org.flywaydb:flyway-core")
 	implementation("org.flywaydb:flyway-database-postgresql")
-	// Métricas &amp; Monitoramento runtimeOnly("io.micrometer:micrometer-registry-prometheus") // AWS SDK v2 - KMS (Criptografia de Envelope com LocalStack)
+
+	// Inserido: Metricas Prometheus isoladas em linha propria
+	runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+
+	// AWS SDK v2 - KMS (Criptografia de Envelope com LocalStack)
 	implementation("software.amazon.awssdk:kms:2.29.0")
+
 	// Testes e Testcontainers
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
-	testImplementation("org.testcontainers:localstack")
+	// Inserido: Versao explicita obrigatoria para o modulo LocalStack do Testcontainers
+	testImplementation("org.testcontainers:localstack:1.20.4")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
