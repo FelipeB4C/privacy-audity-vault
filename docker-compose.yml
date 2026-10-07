@@ -1,0 +1,65 @@
+# ==============================================================================
+# Privacy & Audit Vault (PAV) - Infraestrutura Local de Desenvolvimento
+# Região AWS simulada: ca-central-1 (Montreal, Quebec) - Loi 25 Compliance
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # Banco de Dados Relacional - PostgreSQL 16
+  # Armazena os schemas:
+  #   1. vault_data (PII criptografado + referências de chaves DEK)
+  #   2. audit_log  (Trilha de auditoria imutável append-only)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: pav-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pav_db
+      POSTGRES_USER: pav_user
+      POSTGRES_PASSWORD: pav_password
+    ports:
+      - "5432:5432"
+    volumes:
+      # Inserido: Persistência de dados local para desenvolvimento
+      - postgres_pav_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pav_user -d pav_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Emulador AWS KMS - LocalStack
+  # Simula a API oficial do AWS KMS na região ca-central-1 (Montreal)
+  # Permite executar GenerateDataKey e Decrypt sem conta real na AWS
+  # ----------------------------------------------------------------------------
+  localstack:
+    image: localstack/localstack:latest
+    container_name: pav-localstack-kms
+    restart: unless-stopped
+    ports:
+      # Inserido: Endpoint unificado da API do LocalStack (KMS atenderá nesta porta)
+      - "4566:4566"
+    environment:
+      # Inserido: Habilita apenas o serviço KMS para economizar memória e inicializar rápido
+      - SERVICES=kms
+      # Inserido: Região padrão ca-central-1 para alinhamento com a Loi 25 (Quebec/Montreal)
+      - DEFAULT_REGION=ca-central-1
+      - AWS_DEFAULT_REGION=ca-central-1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # Inserido: Persistência do estado das chaves criadas no LocalStack
+      - localstack_pav_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_pav_data:
+    driver: local
+  localstack_pav_data:
+    driver: local

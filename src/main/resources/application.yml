@@ -1,0 +1,64 @@
+server:
+  port: 8081 # Porta 8081 para não conflitar com o MSTE (8080)
+
+spring:
+  application:
+    name: privacy-audit-vault
+
+  # Configuração do PostgreSQL 16
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pav_db?currentSchema=vault_data,audit_log,public
+    username: pav_user
+    password: pav_password
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  # Spring Data JPA / Hibernate
+  jpa:
+    hibernate:
+      ddl-auto: validate # Gerenciado via Flyway para garantir imutabilidade nos schemas
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: vault_data
+        format_sql: true
+
+  # Versionamento de Banco de Dados via Flyway
+  flyway:
+    enabled: true
+    schemas:
+      - vault_data
+      - audit_log
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+# Configurações customizadas da AWS KMS / LocalStack (Região ca-central-1 para Loi 25)
+aws:
+  region: ca-central-1
+  kms:
+    endpoint: http://localhost:4566 # Porta do LocalStack no docker-compose.yml
+    key-alias: alias/pav-kms-key
+  credentials:
+    access-key: test # Credencial genérica para LocalStack em dev/teste
+    secret-key: test
+
+# Exposição de Métricas do Actuator & Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
