@@ -29,6 +29,15 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 
+	// Lombok and MapStruct
+	compileOnly("org.projectlombok:lombok:1.18.42")
+	annotationProcessor("org.projectlombok:lombok:1.18.42")
+	testCompileOnly("org.projectlombok:lombok:1.18.42")
+	testAnnotationProcessor("org.projectlombok:lombok:1.18.42")
+	implementation("org.mapstruct:mapstruct:1.6.3")
+	annotationProcessor("org.mapstruct:mapstruct-processor:1.6.3")
+	annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
+
 	// Inserido: Driver PostgreSQL isolado em linha propria sem caracteres HTML
 	runtimeOnly("org.postgresql:postgresql")
 	implementation("org.flywaydb:flyway-core")
