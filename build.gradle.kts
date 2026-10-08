@@ -40,6 +40,7 @@ dependencies {
 
 	// Inserido: Driver PostgreSQL isolado em linha propria sem caracteres HTML
 	runtimeOnly("org.postgresql:postgresql")
+	implementation("org.springframework.boot:spring-boot-starter-flyway")
 	implementation("org.flywaydb:flyway-core")
 	implementation("org.flywaydb:flyway-database-postgresql")
 
