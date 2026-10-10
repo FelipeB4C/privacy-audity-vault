@@ -1,158 +1,143 @@
-# Privacy &amp; Audit Vault (PAV)
+# Privacy & Audit Vault (PAV)
 
-[\--Image of: --Java](https://www.google.com/url?sa=E&amp;q=https%3A%2F%2Fjdk.java.net%2F25%2F) [\--Image of: --Spring Boot](https://www.google.com/url?sa=E&amp;q=https%3A%2F%2Fspring.io%2Fprojects%2Fspring-boot) [\--Image of: --PostgreSQL](https://www.google.com/url?sa=E&amp;q=https%3A%2F%2Fwww.postgresql.org%2F) [\--Image of: --AWS KMS](https://www.google.com/url?sa=E&amp;q=https%3A%2F%2Flocalstack.cloud%2F) [\--Image of: --Compliance](https://www.google.com/url?sa=E&amp;q=https%3A%2F%2Fwww.quebec.ca%2Fgouvernement%2Ftravailler-gouvernement%2Ftravailler-fonction-publique%2Fservices-aux-citoyens%2Fprotection-renseignements-personnels)
+Serviço de plataforma para proteger informações pessoais identificáveis (PII), registrar acessos e atender ao direito ao esquecimento no contexto da Loi 25 de Quebec.
 
-&gt; **Cofre centralizado de PII (Personally Identifiable Information) e motor de auditoria imutável projetado para conformidade com a Loi 25 de Quebec (Canadá).**
+> **Fonte de verdade:** a especificação completa está em [`docs/PRIVACY AUDIT VAULT.md`](docs/PRIVACY%20AUDIT%20VAULT.md). Este README resume as decisões documentadas. A documentação descreve a arquitetura desejada; consulte o estado do código antes de assumir que todos os fluxos já estão implementados.
 
----
+## Objetivos e arquitetura
 
-## 📌 Visão Geral
+O PAV centraliza operações sobre PII para que serviços clientes não precisem implementar sua própria criptografia ou trilha de auditoria. A arquitetura segue Ports and Adapters (hexagonal) e separa os dados em dois schemas PostgreSQL:
 
-O **Privacy &amp; Audit Vault (PAV)** é um microsserviço de plataforma agnóstico de domínio desenvolvido para resolver os desafios regulatórios impostos pela **Loi 25** de Quebec em instituições financeiras e fintechs.
+| Schema | Responsabilidade | Consistência |
+| --- | --- | --- |
+| `vault_data` | PII cifrada, referências de DEK e outbox transacional | Operações de gravação e shredding priorizam atomicidade |
+| `audit_log` | Eventos de auditoria append-only, particionados por mês | Persistência assíncrona, com reprocessamento pelo outbox |
 
-Em vez de permitir que múltiplos serviços de negócio (como sistemas de originação de empréstimos — LOS — ou motores de cálculo hipotecário — MSTE) implementem suas próprias soluções de criptografia e auditoria, o PAV centraliza o armazenamento, consulta e destruição de dados pessoais sensíveis (ex: **SIN - Social Insurance Number** e endereço completo).
+Os campos de PII são cifrados com AES-256-GCM usando envelope encryption: uma DEK cifra os dados e o AWS KMS protege a DEK com uma KEK. O LocalStack emula o KMS no desenvolvimento local, na região `ca-central-1`.
 
-### Principais Pilares da Solução
+O evento de auditoria é gravado em `vault_data.audit_outbox` na mesma transação da operação de negócio. Um processador assíncrono grava o evento em `audit_log.audit_log_entry` e marca o outbox como processado; falhas são retentadas com backoff. O log de auditoria é protegido por permissões mínimas e triggers de imutabilidade.
 
-1. **Envelope Encryption (AES-256-GCM + AWS KMS):** Criptografia por campo antes de qualquer escrita no banco de dados. As chaves de dados (*DEK*) são envelopadas por uma chave mestra (*KEK*) mantida no **AWS KMS** na região canadense `ca-central-1` (Montreal). Para execução e testes locais sem custos de nuvem, o serviço utiliza o **LocalStack**.
-2. **Auditoria Imutável e Assíncrona:** Interceptação declarativa de acessos a PII via Spring AOP (`@Auditable`). Os logs são gravados no esquema `audit_log` do PostgreSQL com permissões de `UPDATE` e `DELETE` revogadas e *triggers* de imutabilidade.
-3. **Direito ao Esquecimento via Crypto-Shredding:** Cumprimento do *Right to be Forgotten* em tempo constante $O(1)$. A destruição ou revogação da DEK torna os bytes armazenados residualmente em disco ou backups em lixo matemático irrecuperável.
+No shredding, a aplicação revoga a referência da DEK e remove os ciphertexts na mesma transação que atualiza o registro, cria o `ShredRequest` e grava o evento de auditoria no outbox. A documentação ressalta que backups antigos, WAL e réplicas permanecem sujeitos à política de retenção; a KEK compartilhada não destrói automaticamente cópias históricas.
 
----
+## Tecnologias
 
-## 📐 Arquitetura
+| Camada | Tecnologia |
+| --- | --- |
+| Runtime | Java 25 |
+| Framework | Spring Boot 4.x, Spring Data JPA e Spring AOP |
+| Banco | PostgreSQL 16 |
+| Migrações | Flyway |
+| Criptografia | AES-256-GCM, AWS KMS SDK v2 e LocalStack |
+| Testes de integração | Testcontainers para PostgreSQL e LocalStack |
+| Métricas | Micrometer e Prometheus, sem valores de PII |
 
-O projeto adota **Hexagonal Architecture (Ports and Adapters)**, mantendo a regra de negócio totalmente desacoplada de frameworks, drivers JDBC e SDKs de nuvem.
-
-### Visão de Containers (C4 Level 2)
-
-```
-C4Container
-    title Diagrama de Container - Privacy and Audit Vault (PAV)
-
-    Person(client, "Serviço Cliente (ex: MSTE / LOS)", "Consome operações de PII e auditoria")
-
-    System_Boundary(pav_boundary, "Privacy and Audit Vault") {
-        Container(api, "Vault API", "Spring Boot 4 / Java 25", "Expõe endpoints REST para PII e direito ao esquecimento")
-        Container(domain, "Vault Domain Core", "Java 25 (Hexagonal Core)", "Orquestra operações sem acoplamento a infraestrutura")
-        Container(aop, "Audit Aspect", "Spring AOP", "Intercepta leituras e dispara eventos de auditoria")
-        Container(asyncaudit, "Audit Event Listener", "Spring Async / Virtual Threads", "Persiste auditoria no banco de forma assíncrona")
-        Container(crypto, "Encryption Converter", "AES-256-GCM + AWS KMS SDK v2", "Executa envelope encryption de campos PII")
-        ContainerDb(vaultdb, "Vault Data Store", "PostgreSQL 16 (schema vault_data)", "Persiste PII criptografado e referências de chave")
-        ContainerDb(auditdb, "Audit Log Store", "PostgreSQL 16 (schema audit_log)", "Tabela append-only e particionada de auditoria")
-    }
-
-    System_Ext(kms, "AWS KMS / LocalStack (ca-central-1)", "Gerencia KEK e operações GenerateDataKey/Decrypt")
-
-    Rel(client, api, "Lê, grava ou solicita esquecimento", "HTTPS/JSON")
-    Rel(api, domain, "Delega requisição")
-    Rel(domain, aop, "Método interceptado")
-    Rel(aop, asyncaudit, "Publica AuditEvent pós-commit")
-    Rel(asyncaudit, auditdb, "Persiste registro", "JDBC (async)")
-    Rel(domain, crypto, "Criptografa/decripta campos")
-    Rel(crypto, kms, "GenerateDataKey / Decrypt", "AWS SDK v2")
-    Rel(domain, vaultdb, "Lê/grava dados cifrados", "JDBC")
-
-```
-
----
-
-## 🛠️ Tech Stack
-
-| Camada                 | Tecnologia                                | Propósito                                                                    |
-| ---------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- |
-| **Linguagem**          | Java 25 (LTS)                             | Virtual Threads (Loom) para alta concorrência em I/O e eventos de auditoria. |
-| **Framework**          | Spring Boot 4.x                           | Spring Data JPA, Spring AOP e Spring Security / Actuator.                    |
-| **Criptografia &amp; KMS** | AWS SDK v2 (`software.amazon.awssdk:kms`) | Envelope Encryption na região `ca-central-1` (Montreal).                     |
-| **Ambiente Local**     | LocalStack                                | Emulação local do AWS KMS via Docker.                                        |
-| **Banco de Dados**     | PostgreSQL 16                             | Schemas isolados (`vault_data` e `audit_log` com particionamento mensal).    |
-| **Migrations**         | Flyway                                    | Versionamento imutável de DDL e triggers de auditoria.                       |
-| **Métricas**           | Micrometer + Prometheus                   | Observabilidade de métricas operacionais sem exposição de PII.               |
-| **Testes**             | Testcontainers                            | Testes de integração automatizados subindo PostgreSQL e LocalStack reais.    |
-
----
-
-## 🚀 Como Executar Localmente
+## Executar localmente
 
 ### Pré-requisitos
 
-* **Linux / macOS / WSL2** (Base Debian/Ubuntu recomendado)
-* **Java 25** instalado
-* **Docker &amp; Docker Compose**
+- Java 25
+- Docker e Docker Compose
+- Uma conta LocalStack com acesso ao emulador AWS (plano AWS Freemium ou licença apropriada)
 
-### 1\. Clocar o repositório
+### 1. Clonar o projeto
 
-```
-git clone https://github.com/seu-usuario/privacy-audit-vault.git
+```bash
+git clone https://github.com/FelipeB4C/privacy-audity-vault.git privacy-audit-vault
 cd privacy-audit-vault
-
 ```
 
-### 2\. Subir a infraestrutura (PostgreSQL + LocalStack AWS KMS)
+### 2. Gerar o token de autenticação do LocalStack
 
-```
+O Compose usa a imagem `localstack/localstack:2026.9.1`, que exige `LOCALSTACK_AUTH_TOKEN`. **Não invente um valor:** o token é emitido pela sua conta LocalStack e ativa a licença associada.
+
+1. Entre ou crie uma conta em [app.localstack.cloud](https://app.localstack.cloud/).
+2. Abra a página **Auth Tokens** do workspace.
+3. Gere ou copie seu **Personal Auth Token**. Confirme que a seção **Emulator Access** mostra uma licença para AWS (por exemplo, AWS Freemium). Se não houver licença atribuída, solicite ao administrador do workspace ou atribua uma licença disponível.
+4. Na raiz do projeto, crie um arquivo chamado `.env` e adicione:
+
+   ```dotenv
+   LOCALSTACK_AUTH_TOKEN=cole_seu_token_completo_aqui
+   ```
+
+O `.env` está listado no `.gitignore`. Não cole o token em código, commits, issues, logs ou mensagens. Se ele for exposto, revogue-o/regenere-o na sua conta LocalStack.
+
+### 3. Iniciar PostgreSQL e LocalStack
+
+```bash
 docker compose up -d
-
+docker compose ps
 ```
 
-### 3\. Executar a aplicação Spring Boot
+Espere os serviços ficarem saudáveis. Confira a ativação do LocalStack e a disponibilidade do KMS:
 
-```
-./mvnw spring-boot:run
-
-```
-
----
-
-## 🔌 API Endpoints Principais
-
-### 1\. Armazenar PII Criptografado
-
-* **POST** `/api/v1/vault/{applicantId}`
-* **Payload:**
-
-```
-{
-  "sin": "046-454-286",
-  "fullAddress": "1234 Rue Sainte-Catherine, Montreal, QC H3B 1A7"
-}
-
+```bash
+curl -fsS http://localhost:4566/_localstack/info
+curl -fsS http://localhost:4566/_localstack/health
 ```
 
-* **Response:** `201 Created`
+O endpoint `/_localstack/info` deve indicar `"is_license_activated": true`; no health endpoint, o KMS deve estar disponível ou em execução. Se o container sair com código 55, verifique se o token está completo, válido e associado a uma licença ativa.
 
-### 2\. Recuperar PII (com Auditoria Automática)
+O PostgreSQL local é publicado em `localhost:5432`; o LocalStack em `localhost:4566`. As migrations Flyway são executadas pela aplicação. O Hibernate usa `ddl-auto: validate` para validar o mapeamento sem criar ou alterar o schema.
 
-* **GET** `/api/v1/vault/{applicantId}`
-* **Response:** `200 OK`
+> Na configuração local do Compose, o PostgreSQL inicia com as credenciais de desenvolvimento definidas no próprio `docker-compose.yml`. Para ambientes compartilhados ou de produção, siga a especificação: use um papel restrito para a aplicação (`pav_app`) e mantenha a execução de migrations sob um papel separado, dono dos objetos.
 
-```
-{
-  "applicantId": "3f1a9c2e-7b4d-4e9a-9c11-6a2f0e8d1234",
-  "sin": "046-454-286",
-  "fullAddress": "1234 Rue Sainte-Catherine, Montreal, QC H3B 1A7",
-  "createdAt": "2026-08-02T10:15:00Z"
-}
+### 4. Iniciar a aplicação
 
+```bash
+./gradlew bootRun
 ```
 
-### 3\. Exercer Direito ao Esquecimento (Crypto-Shredding)
+A aplicação local usa a porta `8081`. Para executar os testes existentes:
 
-* **POST** `/api/v1/vault/{applicantId}/forget`
-* **Response:** `202 Accepted`
-
-```
-{
-  "shredRequestId": "9a7c1e3f-2b4d-4e6a-8c10-3f5a7b9d1e2c",
-  "applicantId": "3f1a9c2e-7b4d-4e9a-9c11-6a2f0e8d1234",
-  "status": "COMPLETED",
-  "completedAt": "2026-09-15T14:40:22Z"
-}
-
+```bash
+./gradlew test
 ```
 
----
+## Contratos HTTP documentados
 
-## 📜 Licença
+Os contratos abaixo refletem a especificação técnica. A especificação não define ainda um contrato HTTP para a operação de armazenamento de PII; não presuma uma rota ou payload até que ela seja formalizada.
 
-Este projeto está sob a licença MIT. Sinta-se à vontade para utilizá-lo e adaptá-lo para seu portfólio e estudos.
+### Consultar PII
+
+```http
+GET /api/v1/vault/{applicantId}
+```
+
+Retorna a PII descriptografada em memória e gera um evento `READ` para auditoria.
+
+| Status | Significado |
+| --- | --- |
+| `200 OK` | Registro existe e não foi triturado |
+| `404 Not Found` | `applicantId` não existe |
+| `410 Gone` | Registro já foi triturado |
+| `503 Service Unavailable` | Não foi possível garantir a consistência necessária |
+
+### Exercer o direito ao esquecimento
+
+```http
+POST /api/v1/vault/{applicantId}/forget
+```
+
+Sem corpo de requisição. O shredding é síncrono e transacional.
+
+| Status | Significado |
+| --- | --- |
+| `200 OK` | Shredding concluído |
+| `404 Not Found` | `applicantId` não existe |
+| `409 Conflict` | Registro já havia sido triturado |
+
+## Segurança e operação
+
+- Nunca registrar PII, plaintext de DEK ou token LocalStack em logs ou métricas.
+- Manter a aplicação sem propriedade das tabelas; o papel `pav_app` recebe apenas os privilégios documentados. No `audit_log`, a aplicação deve ter somente `SELECT` e `INSERT`.
+- Tratar o outbox como fonte de reprocessamento para falhas na gravação assíncrona da auditoria.
+- Criar partições mensais de auditoria com antecedência; a partição `DEFAULT` é somente uma rede de segurança.
+- Reter e proteger backups, WAL e réplicas segundo uma política compatível com o prazo de retenção de dados.
+
+## Documentação
+
+- [Especificação técnica, modelos de dados, DDL, diagramas, contratos e estratégia de segurança](docs/PRIVACY%20AUDIT%20VAULT.md)
+
+## Licença
+
+Este projeto está sob a licença MIT.

@@ -35,19 +35,18 @@ services:
   # Permite executar GenerateDataKey e Decrypt sem conta real na AWS
   # ----------------------------------------------------------------------------
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:2026.9.1
     container_name: pav-localstack-kms
     restart: unless-stopped
     ports:
       # Inserido: Endpoint unificado da API do LocalStack (KMS atenderá nesta porta)
       - "4566:4566"
     environment:
-      # Inserido: Habilita apenas o serviço KMS para economizar memória e inicializar rápido
-      - SERVICES=kms
-      # Inserido: Região padrão ca-central-1 para alinhamento com a Loi 25 (Quebec/Montreal)
-      - DEFAULT_REGION=ca-central-1
-      - AWS_DEFAULT_REGION=ca-central-1
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Configure LOCALSTACK_AUTH_TOKEN no ambiente ou em .env}
+      SERVICES: kms
+      DEFAULT_REGION: ca-central-1
+      AWS_DEFAULT_REGION: ca-central-1
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       # Inserido: Persistência do estado das chaves criadas no LocalStack
